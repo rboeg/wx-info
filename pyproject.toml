@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "wx-info"
+version = "0.1.0"
+description = "Weather data pipeline with Airflow, Docker, and PostgreSQL"
+authors = ["Your Name <your.email@example.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.13"
+httpx = "^0.27.0"
+psycopg = {extras = ["binary"], version = "^3.1.18"}
+# polars = "^0.20.16"
+polars-lts-cpu = "^0.20.16"
+fastapi = "^0.111.0"
+uvicorn = "^0.30.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+typing-extensions = "^4.11.0"
+pytest = "^8.2.0"
+black = "^24.4.2"
+isort = "^5.13.2"
+flake8 = "^7.0.0"
+ruff = "^0.4.4"
+mypy = "^1.10.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api" 
