@@ -1,6 +1,22 @@
-from typing import Any
-import polars as pl
-import psycopg
+"""
+Database utilities for the Weather Data Pipeline project.
+
+This module provides functions to:
+- Connect to the PostgreSQL database (psycopg3)
+- Create and manage the normalized schema (stations, weather_observations)
+- Upsert station metadata and weather observation data
+- Query for the latest observation timestamp (for incremental fetch)
+- Check database health (for API health checks)
+
+Usage hints:
+- Expects a valid PostgreSQL DATABASE_URL (see .env.example)
+- All schema changes are managed via create_schema()
+- Upserts use ON CONFLICT for idempotency and incremental loading
+- Designed for use with Polars DataFrames for efficient ETL
+"""
+
+import polars as pl  # Polars is used for fast DataFrame operations
+import psycopg  # Psycopg3 is the modern PostgreSQL driver
 from psycopg import OperationalError
 
 SCHEMA_SQL = """
@@ -22,8 +38,18 @@ CREATE TABLE IF NOT EXISTS weather_observations (
 );
 """
 
+
 def get_connection(db_url: str) -> psycopg.Connection:
-    """Get a psycopg3 connection. Raises OperationalError with diagnostics if connection fails."""
+    """
+    Get a psycopg3 connection to the database.
+
+    Args:
+        db_url (str): PostgreSQL connection string (see .env.example)
+    Returns:
+        psycopg.Connection: Active database connection
+    Raises:
+        OperationalError: If connection fails, with diagnostics for debugging
+    """
     try:
         return psycopg.connect(db_url)
     except OperationalError as e:
@@ -33,8 +59,17 @@ def get_connection(db_url: str) -> psycopg.Connection:
             msg += f" | SQLSTATE: {getattr(diag, 'sqlstate', None)} | Message: {getattr(diag, 'message_primary', None)}"
         raise OperationalError(msg) from e
 
+
 def check_postgres_service(db_url: str, timeout: int = 5) -> bool:
-    """Check if the Postgres service is running and the database is reachable."""
+    """
+    Check if the Postgres service is running and the database is reachable.
+
+    Args:
+        db_url (str): PostgreSQL connection string
+        timeout (int): Connection timeout in seconds (default: 5)
+    Returns:
+        bool: True if reachable, False otherwise
+    """
     try:
         with psycopg.connect(db_url, connect_timeout=timeout) as conn:
             with conn.cursor() as cur:
@@ -44,16 +79,33 @@ def check_postgres_service(db_url: str, timeout: int = 5) -> bool:
     except OperationalError:
         return False
 
+
 def create_schema(conn: psycopg.Connection) -> None:
-    """Create the stations and weather_observations tables if they do not exist."""
+    """
+    Create the stations and weather_observations tables if they do not exist.
+    Idempotent: safe to call multiple times.
+
+    Args:
+        conn (psycopg.Connection): Active database connection
+    """
     with conn.cursor() as cur:
+        # Split SCHEMA_SQL on semicolons to execute each statement separately
         for statement in SCHEMA_SQL.strip().split(';'):
             if statement.strip():
                 cur.execute(statement)
     conn.commit()
 
+
 def upsert_station(conn: psycopg.Connection, station_meta: dict) -> None:
-    """Upsert a station record into the stations table."""
+    """
+    Upsert a station record into the stations table.
+    Uses ON CONFLICT for idempotency (safe for repeated loads).
+
+    Args:
+        conn (psycopg.Connection): Active database connection
+        station_meta (dict): Station metadata (from NWS API observation)
+            Required keys: station_id, name, timeZone, geometry.coordinates
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -69,19 +121,31 @@ def upsert_station(conn: psycopg.Connection, station_meta: dict) -> None:
                 station_meta.get("station_id"),
                 station_meta.get("name"),
                 station_meta.get("timeZone"),
+                # NWS GeoJSON: coordinates = [lon, lat]
                 station_meta.get("geometry", {}).get("coordinates", [None, None])[1],
                 station_meta.get("geometry", {}).get("coordinates", [None, None])[0],
             )
         )
     conn.commit()
 
+
 def upsert_weather_data(conn: psycopg.Connection, df: pl.DataFrame) -> int:
-    """Upsert weather data from a Polars DataFrame into the weather_observations table. Returns the number of rows upserted."""
+    """
+    Upsert weather data from a Polars DataFrame into the weather_observations table.
+    Uses ON CONFLICT for idempotency and incremental loading.
+
+    Args:
+        conn (psycopg.Connection): Active database connection
+        df (pl.DataFrame): DataFrame with columns: station_id, observation_timestamp, temperature, wind_speed, humidity
+    Returns:
+        int: Number of rows upserted
+    """
     if df.is_empty():
         return 0
     records = df.to_dicts()
     with conn.cursor() as cur:
         for rec in records:
+            # Each record is a dict with the required columns
             cur.execute(
                 """
                 INSERT INTO weather_observations (
@@ -97,8 +161,18 @@ def upsert_weather_data(conn: psycopg.Connection, df: pl.DataFrame) -> int:
     conn.commit()
     return len(records)
 
+
 def get_latest_observation_timestamp(conn: psycopg.Connection, station_id: str) -> str | None:
-    """Return the latest observation timestamp for the given station_id, or None if no data exists."""
+    """
+    Return the latest observation timestamp for the given station_id, or None if no data exists.
+    Used for incremental fetch (only fetch new data after this timestamp).
+
+    Args:
+        conn (psycopg.Connection): Active database connection
+        station_id (str): The station identifier
+    Returns:
+        str | None: ISO8601 timestamp string, or None if no data
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -109,4 +183,5 @@ def get_latest_observation_timestamp(conn: psycopg.Connection, station_id: str) 
             (station_id,)
         )
         result = cur.fetchone()
-        return result[0].isoformat() if result and result[0] else None 
+        # result[0] is a datetime or None
+        return result[0].isoformat() if result and result[0] else None

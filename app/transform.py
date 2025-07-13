@@ -1,6 +1,7 @@
 import polars as pl
 from typing import Any, List
 
+
 def flatten_observations(observations: list[dict]) -> pl.DataFrame:
     """
     Transform a list of NWS observation feature dicts into a Polars DataFrame.
@@ -26,6 +27,7 @@ def flatten_observations(observations: list[dict]) -> pl.DataFrame:
         })
     return pl.DataFrame(records)
 
+
 def enrich_with_station(df: pl.DataFrame, station_meta: dict) -> pl.DataFrame:
     """
     Add station name, timezone, latitude, longitude to each row in the DataFrame.
@@ -44,4 +46,4 @@ def enrich_with_station(df: pl.DataFrame, station_meta: dict) -> pl.DataFrame:
         pl.lit(timezone).alias("station_timezone"),
         pl.lit(lat).alias("latitude"),
         pl.lit(lon).alias("longitude")
-    ]) 
+    ])

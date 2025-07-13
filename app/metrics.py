@@ -11,8 +11,8 @@ def get_average_temperature_last_week(conn):
       AVG(o.temperature) AS avg_temperature
     FROM weather_observations o
     JOIN stations s ON o.station_id = s.station_id
-    WHERE o.observation_timestamp >= date_trunc('week', now())
-      AND o.observation_timestamp < date_trunc('week', now()) + interval '7 days'
+    WHERE o.observation_timestamp >= date_trunc('week', now()) - interval '7 days'
+      AND o.observation_timestamp < date_trunc('week', now())
     GROUP BY o.station_id, s.station_name, s.station_timezone, s.latitude, s.longitude;
     """
     with conn.cursor() as cur:
