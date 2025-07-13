@@ -14,15 +14,9 @@ Usage hints:
 - Handles missing data, incremental fetch, and robust error reporting
 """
 import os
-from typing import Any
 
-import api
-import db
+from app import api, db, transform
 from dotenv import load_dotenv
-import httpx
-import polars as pl
-import psycopg
-import transform
 
 
 class WeatherPipeline:
@@ -70,6 +64,8 @@ class WeatherPipeline:
                     # Incremental: fetch only new data
                     start = datetime.fromisoformat(latest_ts)
                     print(f"Latest observation in DB: {latest_ts}. Fetching new data since then.")
+                    # Add 1 second to start to avoid duplicate fetch
+                    start = start + timedelta(seconds=1)
                 try:
                     observations = api.fetch_observations(
                         self.station_id,
@@ -80,8 +76,8 @@ class WeatherPipeline:
                     print(f"Error fetching observations: {e}")
                     raise
                 if not observations:
-                    print("No observations to process.")
-                    raise RuntimeError("No observations to process.")
+                    print("No new observations to process.")
+                    return  # Exit cleanly, do not raise error
                 # Extract station metadata from the first observation (NWS API embeds it)
                 first_obs = observations[0]
                 props = first_obs.get("properties", {})
@@ -97,8 +93,8 @@ class WeatherPipeline:
                 # Transform observations to Polars DataFrame for efficient upsert
                 df = transform.flatten_observations(observations)
                 if df.is_empty():
-                    print("No observations to process.")
-                    raise RuntimeError("No observations to process.")
+                    print("No new observations to process.")
+                    return  # Exit cleanly, do not raise error
                 n = db.upsert_weather_data(conn, df)
                 print(f"Upserted {n} records for station {self.station_id}")
         except Exception as e:
@@ -112,8 +108,13 @@ def main() -> None:
     Loads environment variables, validates required config, and runs the pipeline.
     Prints all output for Airflow/CI log capture.
     """
-    dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
-    load_dotenv(dotenv_path, override=True)
+    # Load environment variables from app/.env if it exists, otherwise from .env in the project root
+    app_env_path = os.path.join(os.path.dirname(__file__), ".env")
+    root_env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+    if os.path.exists(app_env_path):
+        load_dotenv(app_env_path)
+    else:
+        load_dotenv(root_env_path)
 
     WX_STATION_ID = os.environ.get("WX_STATION_ID")
     DATABASE_URL = os.environ.get("DATABASE_URL")

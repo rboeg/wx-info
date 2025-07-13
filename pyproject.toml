@@ -2,7 +2,7 @@
 name = "wx-info"
 version = "0.1.0"
 description = "Weather data pipeline with Airflow, Docker, and PostgreSQL"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Renato B. <renatoboegeholz@gmail.com>"]
 package-mode = false
 
 [tool.poetry.dependencies]
@@ -26,4 +26,9 @@ mypy = "^1.10.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api" 
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::PendingDeprecationWarning:starlette.formparsers"
+] 

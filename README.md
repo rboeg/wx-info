@@ -1,6 +1,7 @@
 # wx-info: Weather Data Pipeline
 
 ## Overview
+
 A modular, containerized weather data pipeline using FastAPI, Airflow, Docker, PostgreSQL, and Python. The pipeline fetches weather data from the National Weather Service API, stores it in a database, and exposes metrics via an API.
 
 ---
@@ -8,35 +9,49 @@ A modular, containerized weather data pipeline using FastAPI, Airflow, Docker, P
 ## Usage Examples
 
 ### Trigger the Pipeline
+
 **Request:**
+
 ```bash
-curl -X POST http://localhost:8000/run-pipeline
+curl -X POST http://localhost:8000/v1/run-pipeline
 ```
+
 **Response (success):**
+
 ```json
 {"status": "Pipeline started"}
 ```
+
 **Response (error, e.g., API not reachable):**
+
 ```json
 {"detail": "Weather API not reachable: ..."}
 ```
 
 ### Get Average Temperature (last week)
+
 **Request:**
+
 ```bash
-curl http://localhost:8000/metrics/average-temperature
+curl http://localhost:8000/v1/metrics/average-temperature
 ```
+
 **Response:**
+
 ```json
 {"average_temperature": 23.5}
 ```
 
 ### Get Max Wind Speed Change (last 7 days)
+
 **Request:**
+
 ```bash
-curl http://localhost:8000/metrics/max-wind-speed-change
+curl http://localhost:8000/v1/metrics/max-wind-speed-change
 ```
+
 **Response:**
+
 ```json
 {"max_wind_speed_change": 12.3}
 ```
@@ -44,6 +59,7 @@ curl http://localhost:8000/metrics/max-wind-speed-change
 ---
 
 ## Assumptions
+
 - **Station ID** is provided via the `WX_STATION_ID` environment variable (see [`env.example`](./env.example)).
 - The database schema is fixed and created automatically if missing (see `app/db.py`).
 - The pipeline fetches 7 days of data on first run, then only new data (incremental fetch).
@@ -55,31 +71,36 @@ curl http://localhost:8000/metrics/max-wind-speed-change
 
 ## Pipeline Flow
 
-<ol type="A">
-  <li><b>Trigger</b>: The pipeline is triggered via the <code>/run-pipeline</code> API or Airflow DAG.</li>
-  <li><b>Environment Validation</b>: Required environment variables are checked at startup.</li>
-  <li><b>DB Connection</b>: Connect to PostgreSQL and ensure the schema exists.</li>
-  <li><b>Determine Fetch Window</b>: If no data exists, fetch last 7 days; otherwise, fetch only new data since the latest observation.</li>
-  <li><b>Fetch Metadata</b>: Retrieve station metadata from the NWS API.</li>
-  <li><b>Fetch Observations</b>: Retrieve weather observations for the determined window.</li>
-  <li><b>Transform</b>: Normalize and enrich the data.</li>
-  <li><b>Upsert</b>: Insert or update records in the database, avoiding duplicates.</li>
-  <li><b>Metrics</b>: Metrics endpoints query the database for analytics.</li>
-</ol>
+- A. **Trigger**: The pipeline is triggered via the `/v1/run-pipeline` API or Airflow DAG.
+- B. **Environment validation**: Required environment variables are checked at startup.
+- C. **DB connection**: Connect to PostgreSQL and ensure the schema exists.
+- D. **Determine fetch window**: If no data exists, fetch last 7 days; otherwise, fetch only new data since the latest observation.
+- E. **Fetch metadata**: Retrieve station metadata from the NWS API.
+- F. **Fetch observations**: Retrieve weather observations for the determined window.
+- G. **Transform**: Normalize the data.
+- H. **Upsert**: Insert or update records in the database, avoiding duplicates.
+- I. **Metrics**: Metrics endpoints query the database for analytics.
 
 ### Pipeline Diagram
 
-```
+```text
 flowchart TD
-    A[Trigger: /run-pipeline or Airflow] --> B[Validate env vars]
+    A[Trigger: /v1/run-pipeline or Airflow] --> B[Validate env vars]
     B --> C[Connect to DB & ensure schema]
     C --> D[Determine fetch window]
     D --> E[Fetch station metadata]
     D --> F[Fetch observations]
-    E & F --> G[Transform & enrich data]
+    E & F --> G[Transform data]
     G --> H[Upsert into DB]
     H --> I[Metrics available via API]
 ```
+
+---
+
+## Development Environment
+
+- The `scripts/env_setup.sh` script creates a local virtual environment (named `wx-info-env`) for development use if Conda/Miniconda is not found, or sets up a Conda environment if available. This ensures all dependencies are installed and isolated for development.
+
 ---
 
 ## Metrics
@@ -87,11 +108,13 @@ flowchart TD
 This project exposes two key metrics via the API, as required by the specification:
 
 ### 1. Average Observed Temperature for Last Week
+
 - **Requirement:**
   - Compute the average observed temperature for last week (Mon-Sun).
 - **Assumption:**
   - "Last week (Mon-Sun)" means the most recent *full* week prior to the current week. For example, if today is Wednesday, June 18, 2025, the last week is Monday, June 9, 2025 00:00:00 to Sunday, June 15, 2025 23:59:59.
 - **SQL Query:**
+
   ```sql
   SELECT
     o.station_id,
@@ -106,17 +129,20 @@ This project exposes two key metrics via the API, as required by the specificati
     AND o.observation_timestamp < date_trunc('week', now())
   GROUP BY o.station_id, s.station_name, s.station_timezone, s.latitude, s.longitude;
   ```
+
 - **Explanation:**
   - `date_trunc('week', now())` gives the timestamp for the most recent Monday at 00:00:00 (start of the current week).
   - Subtracting 7 days gives the start of the previous week (Monday 00:00:00).
   - The query selects all records from last week's Monday (inclusive) up to this week's Monday (exclusive), covering exactly one full week (Mon-Sun).
 
 ### 2. Maximum Wind Speed Change in the Last 7 Days
+
 - **Requirement:**
   - Find the maximum wind speed change between two consecutive observations in the last 7 days.
 - **Assumption:**
   - The "last 7 days" means the 7 days prior to the current moment (rolling window).
 - **SQL Query:**
+
   ```sql
   SELECT
     o.station_id,
@@ -136,6 +162,7 @@ This project exposes two key metrics via the API, as required by the specificati
   JOIN stations s ON t.station_id = s.station_id
   GROUP BY t.station_id, s.station_name, s.station_timezone, s.latitude, s.longitude;
   ```
+
 - **Explanation:**
   - Uses a window function (`LAG`) to compute the difference in wind speed between consecutive observations for each station.
   - Considers only observations from the last 7 days (rolling window).
@@ -148,60 +175,76 @@ This project exposes two key metrics via the API, as required by the specificati
 To deploy the wx-info Weather Data Pipeline, follow these steps:
 
 ### 0. Prerequisites
+
 **Host Requirements:**
-  - Docker and Docker Compose installed and running
-  - Python 3.10+ (for running scripts or local development)
-  - Bash shell (for running provided `.sh` scripts)
+
+- Docker and Docker Compose installed and running
+- Python 3.10+ (for running scripts or local development)
+- Bash shell (for running provided `.sh` scripts)
 
 **Network:**
-  - Internet access (to pull Docker images and fetch weather data from the NWS API)
+
+- Internet access (to pull Docker images and fetch weather data from the NWS API)
 
 ### 1. Environment Setup
+
 a. **Clone the repository:**
-   ```bash
-   git clone git@github.com:rboeg/wx-info.git
-   cd wx-info
-   ```
-b. **Copy and configure environment variables:**
-   - Copy the example environment file:
-     ```bash
-     cp app/.env.example app/.env
-     ```
-   - Edit `app/.env` to set your `DATABASE_URL`, `WX_STATION_ID`, and any other required variables.
-   - (Optional) If using Docker Compose, ensure a `.env` file exists in the project root with the same variables for Compose substitution.
+
+  ```bash
+  git clone git@github.com:rboeg/wx-info.git
+  cd wx-info
+  ```
+
+b. **Configure environment variables:**
+
+- Edit `app/.env` to set your `DATABASE_URL`, `WX_STATION_ID`, and any other required variables.
+- (Optional) If using Docker Compose, ensure a `.env` file exists in the project root with the same variables for Compose substitution.
 
 c. **Run environment setup script:**
-   - This script installs Python dependencies and prepares the environment (for local dev):
-     ```bash
-     ./scripts/env_setup.sh
-     ```
+
+- This script installs Python dependencies and prepares the environment (for local dev):
+
+  ```bash
+  ./scripts/env_setup.sh
+  ```
 
 ### 2. Deploy with Docker Compose
+
 a. **Before starting services, you must create the required Docker network:**
+
   ```bash
   ./scripts/docker_network_setup.sh
   ```
+
 b. **Start all services (API, DB, Airflow, etc.):**
+
   ```bash
   docker compose up --build
   ```
-  - This will build and start all containers as defined in `docker-compose.yml`.
-  - The FastAPI app will be available at `http://localhost:8000` by default.
-  - The Airflow web interface will be available at `http://localhost:8080` by default.
+
+- This will build and start all containers as defined in `docker-compose.yml`.
+- The FastAPI app will be available at `http://localhost:8000` by default.
+- The Airflow web interface will be available at `http://localhost:8080` by default.
 
 ### 3. Running the Pipeline
+
 **Trigger the pipeline via API:**
-   - Use the `/run-pipeline` endpoint to start the ETL process:
-     ```bash
-     curl -X POST http://localhost:8000/v1/run-pipeline
-     ```
-   - Or trigger via Airflow if configured.
+
+- Use the `/run-pipeline` endpoint to start the ETL process:
+
+  ```bash
+  curl -X POST http://localhost:8000/v1/run-pipeline
+  ```
+
+- Or trigger via Airflow if configured.
 
 ### 4. Stopping the Services
+
 **Stop all containers:**
-   ```bash
-   docker compose down
-   ```
+
+  ```bash
+  docker compose down
+  ```
 
 ---
 
@@ -210,10 +253,12 @@ b. **Start all services (API, DB, Airflow, etc.):**
 The following containers are created and managed by `docker compose` using `docker-compose.yml`:
 
 ### Application Containers (API and Database)
+
 - **wx-info-app-1**: The FastAPI application container exposing the weather data API and pipeline endpoints.
 - **wx-info-postgres-1**: PostgreSQL database for storing weather observations and station metadata (used by the app).
 
 ### Airflow Containers
+
 - **wx-info-airflow-init-1**: Initializes Airflow metadata DB and environment on first run.
 - **wx-info-airflow-webserver-1**: Airflow web UI for managing and monitoring DAGs.
 - **wx-info-airflow-triggerer-1**: Handles triggering of deferred tasks in Airflow 2.x.
@@ -244,9 +289,11 @@ You can connect to the application's PostgreSQL database using any standard data
 - The connection details (host, port, user, password, database name) are provided in your `.env` file (see [`env.example`](./env.example)).
 - If running via Docker Compose, the default port is `5432` and the service name is `postgres`.
 - Example connection string:
-  ```
+
+  ```bash
   postgresql://<user>:<password>@localhost:5432/<database>
   ```
+
 - Make sure the database container is running before attempting to connect.
 
 ---
@@ -264,7 +311,7 @@ You can connect to the application's PostgreSQL database using any standard data
 
 #### Entity Relationship Diagram
 
-```
+```text
 stations (dimension)
 -------------------
 station_id (PK)
@@ -281,5 +328,13 @@ temperature
 wind_speed
 humidity
 ```
+
+---
+
+## Tests
+
+Automated tests have been implemented using [pytest](https://pytest.org/). The test suite covers core functionality and a wide range of edge cases, including error handling, database connectivity, and data validation. Tests are located in the `tests/` directory and are designed to ensure the robustness and reliability of the pipeline and API.
+
+As part of the development workflow, tests are automatically run before commits and on pull requests using both GitHub hooks and GitHub Actions. This helps maintain code quality and prevent regressions throughout the development process.
 
 ---

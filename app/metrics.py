@@ -1,6 +1,26 @@
-import psycopg
+"""
+Metrics module for the Weather Data Pipeline project.
 
-def get_average_temperature_last_week(conn):
+Provides SQL-based analytics functions for:
+- Average observed temperature for the last full week (Mon-Sun)
+- Maximum wind speed change in the last 7 days (rolling window)
+
+Each function expects an open database connection and returns query results for analytics endpoints.
+"""
+
+from typing import Any, List
+from psycopg import Connection
+
+
+def get_average_temperature_last_week(conn: Connection) -> List[Any]:
+    """
+    Compute the average observed temperature for the last full week (Mon-Sun) for each station.
+
+    Args:
+        conn (Connection): psycopg database connection
+    Returns:
+        List[Any]: List of tuples with station metadata and average temperature
+    """
     sql = """
     SELECT
       o.station_id,
@@ -19,7 +39,16 @@ def get_average_temperature_last_week(conn):
         cur.execute(sql)
         return cur.fetchall()
 
-def get_max_wind_speed_change_last_7_days(conn):
+
+def get_max_wind_speed_change_last_7_days(conn: Connection) -> List[Any]:
+    """
+    Find the maximum wind speed change between consecutive observations in the last 7 days (rolling window).
+
+    Args:
+        conn (Connection): psycopg database connection
+    Returns:
+        List[Any]: List of tuples with station metadata and max wind speed change
+    """
     sql = """
     SELECT
       o.station_id,
@@ -41,4 +70,4 @@ def get_max_wind_speed_change_last_7_days(conn):
     """
     with conn.cursor() as cur:
         cur.execute(sql)
-        return cur.fetchall() 
+        return cur.fetchall()

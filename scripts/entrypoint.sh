@@ -2,7 +2,7 @@
 set -e
 
 # Load environment variables from .env file for database and app configuration
-export $(awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{gsub(/#.*/,"",$2); gsub(/^[ \t]+|[ \t]+$/,"",$2); print $1"="$2}' .env)
+export $(grep -v '^#' .env | xargs -d '\n')
 
 DATABASE_URL="postgresql://$DATABASE_USER:$DATABASE_PASS@$DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME"
 
@@ -29,7 +29,8 @@ until OUTPUT=$(poetry run python -c "import psycopg; psycopg.connect('$DATABASE_
 done
 
 echo "[entrypoint] Postgres is available. Initializing DB schema..."
-poetry run python -c "import db; import os; db_url=os.environ.get('DATABASE_URL', '$DATABASE_URL'); conn=db.get_connection(db_url); db.create_schema(conn); conn.close()"
+poetry run python -c "import app.db; import os; db_url=os.environ.get('DATABASE_URL', '$DATABASE_URL'); conn=app.db.get_connection(db_url); app.db.create_schema(conn); conn.close()"
 
 echo "[entrypoint] Starting FastAPI app with Uvicorn..."
-exec poetry run uvicorn api:app --host 0.0.0.0 --port 8000 
+# exec poetry run uvicorn api:app --host 0.0.0.0 --port 8000
+exec poetry run uvicorn app.api:app --host 0.0.0.0 --port 8000

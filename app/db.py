@@ -15,9 +15,12 @@ Usage hints:
 - Designed for use with Polars DataFrames for efficient ETL
 """
 
-import polars as pl  # Polars is used for fast DataFrame operations
-import psycopg  # Psycopg3 is the modern PostgreSQL driver
+from typing import Optional
+
+import polars as pl
+import psycopg
 from psycopg import OperationalError
+from psycopg import Connection
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS stations (
@@ -39,7 +42,7 @@ CREATE TABLE IF NOT EXISTS weather_observations (
 """
 
 
-def get_connection(db_url: str) -> psycopg.Connection:
+def get_connection(db_url: str) -> Connection:
     """
     Get a psycopg3 connection to the database.
 
@@ -80,7 +83,7 @@ def check_postgres_service(db_url: str, timeout: int = 5) -> bool:
         return False
 
 
-def create_schema(conn: psycopg.Connection) -> None:
+def create_schema(conn: Connection) -> None:
     """
     Create the stations and weather_observations tables if they do not exist.
     Idempotent: safe to call multiple times.
@@ -96,7 +99,7 @@ def create_schema(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def upsert_station(conn: psycopg.Connection, station_meta: dict) -> None:
+def upsert_station(conn: Connection, station_meta: dict) -> None:
     """
     Upsert a station record into the stations table.
     Uses ON CONFLICT for idempotency (safe for repeated loads).
@@ -129,7 +132,7 @@ def upsert_station(conn: psycopg.Connection, station_meta: dict) -> None:
     conn.commit()
 
 
-def upsert_weather_data(conn: psycopg.Connection, df: pl.DataFrame) -> int:
+def upsert_weather_data(conn: Connection, df: pl.DataFrame) -> int:
     """
     Upsert weather data from a Polars DataFrame into the weather_observations table.
     Uses ON CONFLICT for idempotency and incremental loading.
@@ -162,7 +165,7 @@ def upsert_weather_data(conn: psycopg.Connection, df: pl.DataFrame) -> int:
     return len(records)
 
 
-def get_latest_observation_timestamp(conn: psycopg.Connection, station_id: str) -> str | None:
+def get_latest_observation_timestamp(conn: Connection, station_id: str) -> Optional[str]:
     """
     Return the latest observation timestamp for the given station_id, or None if no data exists.
     Used for incremental fetch (only fetch new data after this timestamp).

@@ -16,12 +16,14 @@ import contextlib
 import io
 import logging
 import os
+from dotenv import load_dotenv
+from typing import Any, Dict
 
-from db import get_connection
+from app.db import get_connection
 from fastapi import FastAPI, HTTPException
 from fastapi import APIRouter
 import httpx
-from metrics import (
+from app.metrics import (
     get_average_temperature_last_week,
     get_max_wind_speed_change_last_7_days,
 )
@@ -31,6 +33,14 @@ from psycopg import OperationalError
 NWS_API_BASE_URL = os.environ.get("NWS_API_BASE_URL", "https://api.weather.gov")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+# Load environment variables from app/.env if it exists, otherwise from .env in the project root
+app_env_path = os.path.join(os.path.dirname(__file__), ".env")
+root_env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+if os.path.exists(app_env_path):
+    load_dotenv(app_env_path)
+else:
+    load_dotenv(root_env_path)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,7 +48,7 @@ logger = logging.getLogger(__name__)
 api_v1 = APIRouter()
 
 
-def fetch_observations(station_id: str, start: str, end: str) -> list:
+def fetch_observations(station_id: str, start: str, end: str) -> list[dict]:
     """
     Fetch weather observations for a station between start and end datetimes.
 
@@ -47,7 +57,7 @@ def fetch_observations(station_id: str, start: str, end: str) -> list:
         start (str): ISO8601 start datetime.
         end (str): ISO8601 end datetime.
     Returns:
-        list: List of observation features (dicts).
+        list[dict]: List of observation features (dicts).
     Raises:
         HTTPException: If the NWS API is unreachable or returns an error.
     """
@@ -64,7 +74,7 @@ def fetch_observations(station_id: str, start: str, end: str) -> list:
 
 
 @api_v1.post("/run-pipeline")
-def run_pipeline():
+def run_pipeline() -> Dict[str, Any]:
     """
     Trigger the weather data pipeline (fetch, transform, load).
     Captures all stdout and returns it in the response for Airflow log visibility.
@@ -75,18 +85,20 @@ def run_pipeline():
     output = io.StringIO()
     try:
         with contextlib.redirect_stdout(output):
-            from pipeline import main
+            from app.pipeline import main
             main()
         return {"status": "Pipeline started", "output": output.getvalue()}
+    except RuntimeError as e:
+        if str(e) == "No new observations to process.":
+            return {"status": "No new observations to process.", "output": output.getvalue()}
+        logger.error(f"Bad input: {e}")
+        return {"error": str(e), "output": output.getvalue()}
     except HTTPException as e:
         logger.error(f"HTTPException: {e.detail}")
         return {"error": str(e), "output": output.getvalue()}
     except OperationalError as e:
         logger.error(f"Database not reachable: {e}")
         return {"error": f"Database not reachable: {e}", "output": output.getvalue()}
-    except RuntimeError as e:
-        logger.error(f"Bad input: {e}")
-        return {"error": str(e), "output": output.getvalue()}
     except httpx.HTTPStatusError as e:
         logger.error(f"Weather API HTTP error: {e}")
         if e.response.status_code == 404:
@@ -104,7 +116,7 @@ def run_pipeline():
 
 
 @api_v1.get("/metrics/average-temperature")
-def average_temperature():
+def average_temperature() -> Dict[str, Any]:
     """
     Get the average temperature for the last week from the database.
 
@@ -123,7 +135,7 @@ def average_temperature():
 
 
 @api_v1.get("/metrics/max-wind-speed-change")
-def max_wind_speed_change():
+def max_wind_speed_change() -> Dict[str, Any]:
     """
     Get the maximum wind speed change over the last 7 days from the database.
 
@@ -142,7 +154,7 @@ def max_wind_speed_change():
 
 
 @api_v1.get("/health")
-def health():
+def health() -> Dict[str, str]:
     """
     Health check endpoint. Verifies database connectivity.
 
