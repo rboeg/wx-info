@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from app import api
+import app.pipeline
 
 client = TestClient(api.app)
 
@@ -16,7 +17,7 @@ class DummyResponse:
 
 
 def test_fetch_observations_success(monkeypatch):
-    def mock_get(url, params, timeout):
+    def mock_get(url, params, timeout, **kwargs):
         return DummyResponse(json_data={"features": [{"properties": {"station": "KATL"}}]})
     monkeypatch.setattr(api.httpx, "get", mock_get)
     obs = api.fetch_observations("KATL", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z")
@@ -25,27 +26,30 @@ def test_fetch_observations_success(monkeypatch):
 
 
 def test_run_pipeline_success(monkeypatch):
-    def mock_main():
-        print("Pipeline started")
-    monkeypatch.setattr("app.pipeline.main", mock_main)
+    class DummyPipeline:
+        def run(self):
+            print("Pipeline started")
+    monkeypatch.setattr(app.pipeline, "WeatherPipeline", lambda *a, **kw: DummyPipeline())
     response = client.post("/v1/run-pipeline")
     assert response.status_code == 200
     assert "Pipeline started" in response.json().get("output", "")
 
 
 def test_run_pipeline_no_new_data(monkeypatch):
-    def mock_main():
-        raise RuntimeError("No new observations to process.")
-    monkeypatch.setattr("app.pipeline.main", mock_main)
+    class DummyPipeline:
+        def run(self):
+            raise RuntimeError("No new observations to process.")
+    monkeypatch.setattr(app.pipeline, "WeatherPipeline", lambda *a, **kw: DummyPipeline())
     response = client.post("/v1/run-pipeline")
     assert response.status_code == 200
     assert response.json().get("status") == "No new observations to process."
 
 
 def test_run_pipeline_error(monkeypatch):
-    def mock_main():
-        raise Exception("Some error")
-    monkeypatch.setattr("app.pipeline.main", mock_main)
+    class DummyPipeline:
+        def run(self):
+            raise Exception("Some error")
+    monkeypatch.setattr(app.pipeline, "WeatherPipeline", lambda *a, **kw: DummyPipeline())
     response = client.post("/v1/run-pipeline")
     assert response.status_code == 200
     assert "Pipeline failed" in response.json().get("error", "")

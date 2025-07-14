@@ -23,7 +23,9 @@ from psycopg import OperationalError
 from psycopg import Connection
 
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS stations (
+CREATE SCHEMA IF NOT EXISTS wxinfo;
+
+CREATE TABLE IF NOT EXISTS wxinfo.stations (
     station_id TEXT PRIMARY KEY,
     station_name TEXT,
     station_timezone TEXT,
@@ -31,12 +33,15 @@ CREATE TABLE IF NOT EXISTS stations (
     longitude DOUBLE PRECISION
 );
 
-CREATE TABLE IF NOT EXISTS weather_observations (
-    station_id TEXT NOT NULL REFERENCES stations(station_id),
+CREATE TABLE IF NOT EXISTS wxinfo.weather_observations (
+    station_id TEXT NOT NULL REFERENCES wxinfo.stations(station_id),
     observation_timestamp TIMESTAMPTZ NOT NULL,
     temperature DOUBLE PRECISION,
+    dewpoint DOUBLE PRECISION,
     wind_speed DOUBLE PRECISION,
-    humidity DOUBLE PRECISION,
+    barometric_pressure DOUBLE PRECISION,
+    relative_humidity DOUBLE PRECISION,
+    precipitation_last_hour DOUBLE PRECISION,
     PRIMARY KEY (station_id, observation_timestamp)
 );
 """
@@ -44,7 +49,7 @@ CREATE TABLE IF NOT EXISTS weather_observations (
 
 def get_connection(db_url: str) -> Connection:
     """
-    Get a psycopg3 connection to the database.
+    Get a psycopg3 connection to the database, and set search_path to wxinfo.
 
     Args:
         db_url (str): PostgreSQL connection string (see .env.example)
@@ -54,11 +59,15 @@ def get_connection(db_url: str) -> Connection:
         OperationalError: If connection fails, with diagnostics for debugging
     """
     try:
-        return psycopg.connect(db_url)
+        conn = psycopg.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute("SET search_path TO wxinfo;")
+        return conn
     except OperationalError as e:
         diag = getattr(e, 'diag', None)
         msg = f"Could not connect to database: {e}"
         if diag:
+            # Add extra diagnostic info if available (SQLSTATE, message)
             msg += f" | SQLSTATE: {getattr(diag, 'sqlstate', None)} | Message: {getattr(diag, 'message_primary', None)}"
         raise OperationalError(msg) from e
 
@@ -80,6 +89,7 @@ def check_postgres_service(db_url: str, timeout: int = 5) -> bool:
                 cur.fetchone()
         return True
     except OperationalError:
+        # Connection failed or DB not reachable
         return False
 
 
@@ -107,12 +117,12 @@ def upsert_station(conn: Connection, station_meta: dict) -> None:
     Args:
         conn (psycopg.Connection): Active database connection
         station_meta (dict): Station metadata (from NWS API observation)
-            Required keys: station_id, name, timeZone, geometry.coordinates
+            Required keys: station_id, name, timeZone, latitude, longitude
     """
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO stations (station_id, station_name, station_timezone, latitude, longitude)
+            INSERT INTO wxinfo.stations (station_id, station_name, station_timezone, latitude, longitude)
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (station_id) DO UPDATE SET
                 station_name = EXCLUDED.station_name,
@@ -124,9 +134,8 @@ def upsert_station(conn: Connection, station_meta: dict) -> None:
                 station_meta.get("station_id"),
                 station_meta.get("name"),
                 station_meta.get("timeZone"),
-                # NWS GeoJSON: coordinates = [lon, lat]
-                station_meta.get("geometry", {}).get("coordinates", [None, None])[1],
-                station_meta.get("geometry", {}).get("coordinates", [None, None])[0],
+                station_meta.get("latitude"),
+                station_meta.get("longitude"),
             )
         )
     conn.commit()
@@ -139,7 +148,7 @@ def upsert_weather_data(conn: Connection, df: pl.DataFrame) -> int:
 
     Args:
         conn (psycopg.Connection): Active database connection
-        df (pl.DataFrame): DataFrame with columns: station_id, observation_timestamp, temperature, wind_speed, humidity
+        df (pl.DataFrame): DataFrame with columns: station_id, observation_timestamp, temperature, wind_speed, barometric_pressure, relative_humidity, precipitation_last_hour, dewpoint
     Returns:
         int: Number of rows upserted
     """
@@ -148,16 +157,20 @@ def upsert_weather_data(conn: Connection, df: pl.DataFrame) -> int:
     records = df.to_dicts()
     with conn.cursor() as cur:
         for rec in records:
-            # Each record is a dict with the required columns
             cur.execute(
                 """
-                INSERT INTO weather_observations (
-                    station_id, observation_timestamp, temperature, wind_speed, humidity
-                ) VALUES (%(station_id)s, %(observation_timestamp)s, %(temperature)s, %(wind_speed)s, %(humidity)s)
+                INSERT INTO wxinfo.weather_observations (
+                    station_id, observation_timestamp, temperature, wind_speed, barometric_pressure, relative_humidity, precipitation_last_hour, dewpoint
+                ) VALUES (
+                    %(station_id)s, %(observation_timestamp)s, %(temperature)s, %(wind_speed)s, %(barometric_pressure)s, %(relative_humidity)s, %(precipitation_last_hour)s, %(dewpoint)s
+                )
                 ON CONFLICT (station_id, observation_timestamp) DO UPDATE SET
                     temperature = EXCLUDED.temperature,
                     wind_speed = EXCLUDED.wind_speed,
-                    humidity = EXCLUDED.humidity;
+                    barometric_pressure = EXCLUDED.barometric_pressure,
+                    relative_humidity = EXCLUDED.relative_humidity,
+                    precipitation_last_hour = EXCLUDED.precipitation_last_hour,
+                    dewpoint = EXCLUDED.dewpoint;
                 """,
                 rec
             )
@@ -180,7 +193,7 @@ def get_latest_observation_timestamp(conn: Connection, station_id: str) -> Optio
         cur.execute(
             """
             SELECT MAX(observation_timestamp)
-            FROM weather_observations
+            FROM wxinfo.weather_observations
             WHERE station_id = %s
             """,
             (station_id,)

@@ -52,7 +52,7 @@ def test_upsert_station_full_partial():
     # Partial metadata
     meta2 = {"station_id": "KATL", "name": "Test2"}
     db.upsert_station(conn, meta2)  # type: ignore[arg-type]
-    assert any("INSERT INTO stations" in sql for sql, _ in conn.cursor_obj.executed)
+    assert any("INSERT INTO wxinfo.stations" in sql for sql, _ in conn.cursor_obj.executed)
     assert conn.committed
 
 
@@ -70,11 +70,12 @@ def test_upsert_weather_data_empty_valid():
         "observation_timestamp": ["2024-01-01T00:00:00Z"],
         "temperature": [10.0],
         "wind_speed": [5.0],
-        "humidity": [50.0],
+        "relative_humidity": [50.0],
+        "dewpoint": [10.0],
     })
     n2 = db.upsert_weather_data(conn, df)  # type: ignore[arg-type]
     assert n2 == 1
-    assert any("INSERT INTO weather_observations" in sql for sql, _ in conn.cursor_obj.executed)
+    assert any("INSERT INTO wxinfo.weather_observations" in sql for sql, _ in conn.cursor_obj.executed)
     assert conn.committed
 
 

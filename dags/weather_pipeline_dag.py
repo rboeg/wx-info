@@ -10,8 +10,8 @@ Usage hints:
 - Requires an Airflow HTTP connection named 'app_api' (see Airflow UI > Admin > Connections)
 - The 'app_api' connection is created automatically with the Airflow container using the environment variable:
     AIRFLOW_CONN_APP_API=http://app:8000
-- The FastAPI app must be running and accessible from the Airflow container
-- Schedule and start_date can be adjusted as needed
+- The FastAPI app must be running and accessible from the Airflow container.
+- Schedule and start_date can be adjusted as needed.
 """
 
 from airflow.decorators import dag, task
@@ -30,8 +30,8 @@ default_args = {
 @dag(
     default_args=default_args,
     description='Weather data pipeline DAG',
-    schedule_interval='@daily',
-    start_date=datetime(2025, 7, 1),
+    schedule_interval='@hourly',
+    start_date=datetime(2025, 7, 10),
     catchup=False,
     tags=['weather', 'pipeline']
 )
@@ -41,7 +41,12 @@ def weather_pipeline():
     - start: Dummy task for DAG start
     - run_pipeline_task: Triggers the FastAPI /v1/run-pipeline endpoint
     - end: Dummy task for DAG end
+
+    To trigger the pipeline for multiple stations, set the 'data' parameter in HttpOperator as follows:
+        data=json.dumps({"station_ids": ["KATL", "003PG"]})
+    If 'data' is not set, the API will use the NWS_STATION_ID environment variable (which can be a string or JSON array).
     """
+    # import json  # Uncomment if you use the 'data' parameter below
     @task
     def start():
         """Dummy start task for DAG visualization."""
@@ -60,6 +65,8 @@ def weather_pipeline():
         endpoint='v1/run-pipeline',
         method='POST',
         headers={'Content-Type': 'application/json'},
+        # Uncomment and edit the next line to trigger for specific stations:
+        # data=json.dumps({"station_ids": ["KATL", "003PG"]}),
         log_response=True
     )
     end_task = end()
